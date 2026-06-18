@@ -1,0 +1,91 @@
+#define BLYNK_TEMPLATE_ID "TMPL39jrK8mS3"
+#define BLYNK_TEMPLATE_NAME "FIRE AND SMOKE ALERT SYSTEM"
+#define BLYNK_AUTH_TOKEN "rM58Ql_7JI4URU0vvneFJ8krvvgAIGDg"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <DHT.h>
+#include <ESP32Servo.h>
+#include <LiquidCrystal_I2C.h>
+
+#define DHTPIN 4
+#define DHTTYPE DHT22
+#define SMOKE_PIN 34 
+
+const int redLed = 19, greenLed = 18, buzzer = 25, relay = 14, servoPin = 13;
+char auth[] = BLYNK_AUTH_TOKEN, ssid[] = "Wokwi-GUEST", pass[] = "";
+
+DHT dht(DHTPIN, DHTTYPE);
+Servo myServo;
+BlynkTimer timer;
+
+unsigned long lastNotifyTime = 0; 
+
+// Sirf Ek LCD ka setup
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
+void sendSensorData() {
+  float temp = dht.readTemperature();
+  int smokePercent = map(analogRead(SMOKE_PIN), 0, 4095, 0, 100);
+
+  if (isnan(temp)) return;
+
+  Blynk.virtualWrite(V1, temp);         
+  Blynk.virtualWrite(V3, smokePercent); 
+
+  // Emergency Mode (Temp > 45 aur Smoke > 50)
+  if (temp > 45.0 && smokePercent > 50) {
+    digitalWrite(redLed, HIGH); digitalWrite(greenLed, LOW); digitalWrite(relay, HIGH);
+    tone(buzzer, 1000); myServo.write(90);
+    
+    Serial.println("FIRE AND SMOKE DETECT - PUMP ON");
+
+    // LCD Alert Message
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print("FIRE & SMOKE!!!");
+    lcd.setCursor(0, 1); lcd.print("PUMP: ON        ");
+
+    if (millis() - lastNotifyTime >= 60000) {
+      Blynk.logEvent("fire_and_smoke_alert", "CRITICAL: Fire & Smoke!");
+      lastNotifyTime = millis();
+    }
+  } 
+  // Normal Mode
+  else {
+    digitalWrite(redLed, LOW); digitalWrite(greenLed, HIGH); digitalWrite(relay, LOW);
+    noTone(buzzer); myServo.write(0);
+
+    Serial.print("CURRENT TEMPERATURE: "); Serial.println(temp);
+
+    // LCD Normal Display (Dono sensors ka data ek saath)
+    lcd.setCursor(0, 0); 
+    lcd.print("T:"); lcd.print(temp); lcd.print("C "); 
+    lcd.print("S:"); lcd.print(smokePercent); lcd.print("%   "); // T=Temp, S=Smoke
+    
+    lcd.setCursor(0, 1); 
+    lcd.print("SYSTEM: NORMAL  ");
+    
+    lastNotifyTime = 0; 
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  lcd.init(); 
+  lcd.backlight();
+  lcd.clear();
+
+  Blynk.begin(auth, ssid, pass);
+  dht.begin();
+  myServo.attach(servoPin);
+  pinMode(redLed, OUTPUT); pinMode(greenLed, OUTPUT);
+  pinMode(buzzer, OUTPUT); pinMode(relay, OUTPUT);
+  
+  timer.setInterval(2000L, sendSensorData);
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
